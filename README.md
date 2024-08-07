@@ -1,4 +1,4 @@
-httf
+httpf
 -----
 
 A Simple HTTP Reverse Proxy Firewall Designed to Block Offending

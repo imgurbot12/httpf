@@ -16,7 +16,7 @@ use hyper::{Request, Response};
 
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::config::{Config, IpList, ListenConfig, ResolveConfig};
+use crate::config::*;
 use crate::tokiort::TokioIo;
 
 static PROXY_HEADERS: [&str; 6] = [
@@ -33,16 +33,15 @@ type ProxyResponse = Response<BoxBody<Bytes, hyper::Error>>;
 type ProxyResult = Result<ProxyResponse, hyper::Error>;
 
 struct ProxyInner {
-    whitelist: IpList,
-    blacklist: IpList,
+    config: FirewallConfig,
 }
 
 impl ProxyInner {
     pub fn is_blocked(&self, ip: IpAddr) -> Option<IpAddr> {
-        if self.whitelist.contains(&ip) {
+        if self.config.whitelist.contains(&ip) {
             return None;
         }
-        if self.blacklist.contains(&ip) {
+        if self.config.blacklist.contains(&ip) {
             return Some(ip);
         }
         None
@@ -63,8 +62,7 @@ impl ReverseProxy {
             listen: config.listen,
             resolve: config.resolve,
             inner: Arc::new(Mutex::new(ProxyInner {
-                whitelist: config.whitelist,
-                blacklist: config.blacklist,
+                config: config.firewall,
             })),
         }
     }
@@ -93,8 +91,8 @@ impl ReverseProxy {
                 let headers = req.headers();
                 let inner = inner.lock().expect("failed mutex lock");
                 let mut blocked = inner.is_blocked(ipaddr);
-                if blocked.is_none() {
-                    blocked = get_forward_ip(headers)
+                if inner.config.trust_proxy_headers && blocked.is_none() {
+                    blocked = get_forward_ip(headers, &inner.config.trusted_headers)
                         .into_iter()
                         .find(|ip| inner.is_blocked(*ip).is_some());
                 }
@@ -140,9 +138,17 @@ fn header(headers: &HeaderMap<HeaderValue>, key: &str) -> Option<String> {
     }
 }
 
-fn get_forward_ip(headers: &HeaderMap<HeaderValue>) -> Vec<IpAddr> {
+#[inline]
+fn is_trusted(trusted: &TrustedHeaders, header: &str) -> bool {
+    trusted
+        .as_ref()
+        .map(|trusted| trusted.contains(&header.to_string()))
+        .unwrap_or(true)
+}
+
+fn get_forward_ip(headers: &HeaderMap<HeaderValue>, trusted: &TrustedHeaders) -> Vec<IpAddr> {
     let mut ips = IpList::new();
-    for name in PROXY_HEADERS.iter() {
+    for name in PROXY_HEADERS.iter().filter(|key| is_trusted(trusted, key)) {
         if let Some(header) = header(headers, name) {
             ips.extend(
                 header
@@ -152,19 +158,21 @@ fn get_forward_ip(headers: &HeaderMap<HeaderValue>) -> Vec<IpAddr> {
         }
     }
     // syntax: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Forwarded
-    if let Some(header) = header(headers, "forwarded") {
-        ips.extend(
-            header
-                .split(';')
-                .into_iter()
-                .map(|kv| kv.split(','))
-                .flatten()
-                .filter_map(|kv| kv.trim().split_once('='))
-                .filter(|(k, _)| *k == "for")
-                .map(|(_, v)| v.trim_matches(|c| c == '[' || c == '"' || c == '\''))
-                .map(|v| v.split_once(']').map(|(s, _)| s).unwrap_or(v))
-                .filter_map(|ip| IpAddr::from_str(ip).ok()),
-        );
+    if is_trusted(trusted, "forwarded") {
+        if let Some(header) = header(headers, "forwarded") {
+            ips.extend(
+                header
+                    .split(';')
+                    .into_iter()
+                    .map(|kv| kv.split(','))
+                    .flatten()
+                    .filter_map(|kv| kv.trim().split_once('='))
+                    .filter(|(k, _)| *k == "for")
+                    .map(|(_, v)| v.trim_matches(|c| c == '[' || c == '"' || c == '\''))
+                    .map(|v| v.split_once(']').map(|(s, _)| s).unwrap_or(v))
+                    .filter_map(|ip| IpAddr::from_str(ip).ok()),
+            );
+        }
     }
     ips.into_iter().collect()
 }

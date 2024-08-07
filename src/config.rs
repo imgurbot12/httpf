@@ -17,13 +17,22 @@ pub struct ListenConfig {
 }
 
 pub type IpList = HashSet<IpAddr>;
+pub type TrustedHeaders = Option<HashSet<String>>;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FirewallConfig {
+    pub trust_proxy_headers: bool,
+    #[serde(default)]
+    pub trusted_headers: TrustedHeaders,
+    #[serde(default)]
+    pub whitelist: IpList,
+    #[serde(default)]
+    pub blacklist: IpList,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
     pub resolve: ResolveConfig,
-    #[serde(default)]
-    pub whitelist: IpList,
-    #[serde(default)]
-    pub blacklist: IpList,
+    pub firewall: FirewallConfig,
 }
