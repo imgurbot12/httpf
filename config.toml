@@ -1,0 +1,10 @@
+blacklist = ['1.2.3.4']
+whitelist = ['127.0.0.1']
+
+[listen]
+host = '127.0.0.1'
+port = 8001
+
+[resolve]
+host = '127.0.0.1'
+port = 9000
