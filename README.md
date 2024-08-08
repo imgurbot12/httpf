@@ -59,7 +59,7 @@ $ httpf
 
 Declare a new Fail2ban Action via `/etc/fail2ban/action.d/httpf.conf`
 
-```toml
+```
 [Definition]
 actionstart =
 actionstop =
