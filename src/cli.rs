@@ -114,7 +114,7 @@ impl ListCommand {
                 let ip = args.ip.to_string().italic();
                 match result {
                     true => println!("{s} {ip} added to {name}."),
-                    false => println!("{f} {ip} {} in {name}.", "expiration updated".italic()),
+                    false => println!("{s} {ip} {} in {name}.", "expiration updated".italic()),
                 }
                 Ok(true)
             }
@@ -132,7 +132,7 @@ impl ListCommand {
                 let ip = args.ip.to_string().italic();
                 match result {
                     true => println!("{s} {ip} in {name}."),
-                    false => println!("{s} {ip} {} from {name}.", "missing".italic().red()),
+                    false => println!("{f} {ip} {} from {name}.", "missing".italic().red()),
                 }
                 Ok(result)
             }
