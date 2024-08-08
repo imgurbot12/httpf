@@ -98,28 +98,36 @@ impl ReverseProxy {
                 .await
                 .context("failed to accept client socket")?;
             let io = TokioIo::new(stream);
+            log::debug!("New Connection {addr:?}");
 
             // build proxy handler function
             let inner = Arc::clone(&self.inner);
             let config = self.resolve.clone();
             let proxy_fn = service_fn(move |req| {
                 // check if native ip or forwarded ip should be accepted/rejected
-                let ipaddr = addr.ip();
+                let mut ip = addr.ip();
                 let headers = req.headers();
                 let inner = inner.lock().expect("failed mutex lock");
-                let mut blocked = inner.is_blocked(ipaddr);
-                if inner.config.trust_proxy_headers && blocked.is_none() {
-                    blocked = get_forward_ip(headers, &inner.config.trusted_headers)
-                        .into_iter()
-                        .find(|ip| inner.is_blocked(*ip).is_some());
+                let mut blocked = inner.is_blocked(ip);
+                if inner.config.trust_proxy_headers {
+                    let ips = get_forward_ip(headers, &inner.config.trusted_headers);
+                    if !ips.is_empty() {
+                        ip = ips[0];
+                    }
+                    if blocked.is_none() {
+                        blocked = ips.into_iter().find(|ip| inner.is_blocked(*ip).is_some());
+                    }
                 }
                 // handle forwarding request
                 let config = config.clone();
                 async move {
                     match blocked {
-                        None => proxy(config, req).await,
+                        None => {
+                            log::info!("[ACCEPT] {ip:?} ({} {})", req.method(), req.uri());
+                            proxy(config, req).await
+                        }
                         Some(ip) => {
-                            log::warn!("BLOCKED: {ip:?} ({} {})", req.method(), req.uri());
+                            log::warn!("[REJECTED] {ip:?} ({} {})", req.method(), req.uri());
                             Ok(blocked_response())
                         }
                     }
