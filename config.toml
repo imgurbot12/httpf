@@ -1,14 +1,15 @@
 [listen]
-host = '127.0.0.1'
-port = 8001
+host = '127.0.0.1' # httpf listener host
+port = 8001        # httpf listener port
 
 [resolve]
-host = '127.0.0.1'
-port = 9000
+host = 'example.com' # protected resource that valid requests resolve to
+port = 80            # port of host to connect to
 
 [firewall]
-trust_proxy_headers = true
-trusted_headers = ['cf-connecting-ip', 'x-real-ip']
+trust_proxy_headers = false # useful if httpf is behind another proxy
+trusted_headers = ['cf-connecting-ip', 'x-real-ip'] # only allow headers u trust
 
-blacklist = ['1.2.3.4']
+# permanant and cached blacklist/whitelist entries
+blacklist = []
 whitelist = ['127.0.0.1']
