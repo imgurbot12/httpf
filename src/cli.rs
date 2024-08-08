@@ -217,6 +217,11 @@ impl FromStr for Expiration {
             let date = Utc::now().add(duration);
             return Ok(Self(date));
         }
+        if let Ok(seconds) = u64::from_str(s) {
+            let duration = TimeDelta::seconds(seconds as i64);
+            let date = Utc::now().add(duration);
+            return Ok(Self(date));
+        }
         Err(format!("invalid expiration: {s:?}"))
     }
 }
