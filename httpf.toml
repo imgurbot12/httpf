@@ -13,3 +13,6 @@ trusted_headers = ['cf-connecting-ip', 'x-real-ip'] # only allow headers u trust
 # permanant and cached blacklist/whitelist entries
 blacklist = []
 whitelist = ['127.0.0.1']
+
+# database filepath
+database = '/var/lib/httpf/httpf.db'

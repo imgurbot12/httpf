@@ -44,10 +44,29 @@ trusted_headers = ['cf-connecting-ip', 'x-real-ip'] # only allow headers u trust
 # permanant and cached blacklist/whitelist entries
 blacklist = []
 whitelist = ['127.0.0.1']
+
+# database filepath
+database = '/var/lib/httpf/httpf.db'
 ```
 
 2. Run httpf:
 
 ```bash
-$ httpf --config ./config.toml
+$ httpf
 ```
+
+### Fail2Ban Setup
+
+Declare a new Fail2ban Action via `/etc/fail2ban/action.d/httpf.conf`
+
+```toml
+[Definition]
+actionstart =
+actionstop =
+actioncheck =
+actionban = httpf blacklist add <ip>
+actionunban = httpf blacklist remove <ip>
+```
+
+Configure your jail of choice in `/etc/fail2ban/jail.d/`
+and include: `action = httpf`
