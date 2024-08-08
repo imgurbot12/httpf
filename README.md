@@ -4,7 +4,11 @@ httpf
 Dead Simple HTTP Reverse Proxy Firewall.
 
 <!--
+  DONE: implement expiration into cli and active db entry
+  TODO: close connection if keep-alive is not specified? 
   TODO: document fail2ban implementation
+  TODO: implement memory cache for sqlite entries?
+  TODO: implement connection pooling for client address?
 -->
 
 ### Features:
@@ -21,7 +25,7 @@ $ cargo install --path .
 
 ### Quick Start
 
-1. Configure `config.toml` to specify your listener, protected resolution,
+1. Configure `httpf.toml` to specify your listener, protected resolution,
 and firewall options.
 
 ```toml

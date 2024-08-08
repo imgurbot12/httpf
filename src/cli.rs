@@ -55,8 +55,8 @@ pub enum Command {
 #[derive(Debug, Parser)]
 pub struct Cli {
     /// Configuration filepath
-    #[clap(short, long, default_value = "config.toml")]
-    pub config: PathBuf,
+    #[clap(short, long)]
+    pub config: Option<PathBuf>,
     /// Httpf Command
     #[clap(subcommand)]
     pub command: Option<Command>,
@@ -64,9 +64,26 @@ pub struct Cli {
 
 impl Cli {
     pub fn read_config(&self) -> Result<Config> {
-        let content =
-            std::fs::read_to_string(&self.config).context("failed to read config file")?;
-        toml::from_str(&content).context("invalid configuration")
+        let paths = vec![
+            PathBuf::from("./httpf.toml"),
+            dirs::config_dir()
+                .expect("failed to find config dir")
+                .join("httpf.toml"),
+            PathBuf::from("/etc/httpf.toml"),
+            PathBuf::from("/var/lib/httpf/httpf.toml"),
+        ];
+        let mut config = self.config.clone();
+        if config.is_none() {
+            config = paths.into_iter().find(|p| p.exists());
+        }
+        match config.as_ref() {
+            None => Err(anyhow::anyhow!("unable to locate config file")),
+            Some(config) => {
+                let content =
+                    std::fs::read_to_string(config).context("failed to read config file")?;
+                toml::from_str(&content).context("invalid configuration")
+            }
+        }
     }
 }
 

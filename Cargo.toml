@@ -9,6 +9,7 @@ bytes = "1.7.1"
 chrono = "0.4.38"
 clap = { version = "4.5.13", features = ["derive"] }
 colored = "2.1.0"
+dirs = "5.0.1"
 env_logger = "0.11.5"
 http = "1.1.0"
 http-body-util = "0.1.2"
