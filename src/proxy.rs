@@ -105,14 +105,15 @@ impl ReverseProxy {
             let config = self.resolve.clone();
             let proxy_fn = service_fn(move |req| {
                 // check if native ip or forwarded ip should be accepted/rejected
-                let mut ip = addr.ip();
+                let src = addr.ip();
+                let mut real = src.clone();
                 let headers = req.headers();
                 let inner = inner.lock().expect("failed mutex lock");
-                let mut blocked = inner.is_blocked(ip);
+                let mut blocked = inner.is_blocked(src);
                 if inner.config.trust_proxy_headers {
                     let ips = get_forward_ip(headers, &inner.config.trusted_headers);
                     if !ips.is_empty() {
-                        ip = ips[0];
+                        real = ips[0];
                     }
                     if blocked.is_none() {
                         blocked = ips.into_iter().find(|ip| inner.is_blocked(*ip).is_some());
@@ -121,13 +122,15 @@ impl ReverseProxy {
                 // handle forwarding request
                 let config = config.clone();
                 async move {
+                    let uri = req.uri();
+                    let method = req.method();
                     match blocked {
                         None => {
-                            log::info!("[ACCEPT] {ip:?} ({} {})", req.method(), req.uri());
+                            log::info!("[ACCEPT] {real} (from: {src}) {method} {uri}");
                             proxy(config, req).await
                         }
-                        Some(ip) => {
-                            log::warn!("[REJECTED] {ip:?} ({} {})", req.method(), req.uri());
+                        Some(real) => {
+                            log::warn!("[REJECT] {real} (from: {src}) {method} {uri}");
                             Ok(blocked_response())
                         }
                     }
