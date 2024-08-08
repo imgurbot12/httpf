@@ -28,6 +28,8 @@ pub struct FirewallConfig {
     pub whitelist: IpList,
     #[serde(default)]
     pub blacklist: IpList,
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

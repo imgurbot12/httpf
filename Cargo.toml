@@ -6,15 +6,16 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 bytes = "1.7.1"
+chrono = "0.4.38"
 clap = { version = "4.5.13", features = ["derive"] }
-dirs = "5.0.1"
+colored = "2.1.0"
 env_logger = "0.11.5"
 http = "1.1.0"
 http-body-util = "0.1.2"
 hyper = { version = "1.4.1", features = ["client", "http1", "server"] }
-hyper-util = "0.1.7"
 log = "0.4.22"
 pin-project-lite = "0.2.14"
+rusqlite = { version = "0.32.1", features = ["chrono"] }
 serde = { version = "1.0.204", features = ["derive"] }
 tokio = { version = "1.39.2", features = ["io-util", "macros", "net", "rt-multi-thread"] }
 toml = "0.8.19"

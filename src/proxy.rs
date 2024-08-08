@@ -17,6 +17,7 @@ use hyper::{Request, Response};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::config::*;
+use crate::database::Database;
 use crate::tokiort::TokioIo;
 
 static PROXY_HEADERS: [&str; 6] = [
@@ -34,6 +35,7 @@ type ProxyResult = Result<ProxyResponse, hyper::Error>;
 
 struct ProxyInner {
     config: FirewallConfig,
+    database: Database,
 }
 
 impl ProxyInner {
@@ -42,6 +44,20 @@ impl ProxyInner {
             return None;
         }
         if self.config.blacklist.contains(&ip) {
+            return Some(ip);
+        }
+        if self
+            .database
+            .whitelist_contains(&ip)
+            .expect("db whitelist access failed")
+        {
+            return None;
+        }
+        if self
+            .database
+            .blacklist_contains(&ip)
+            .expect("db blacklist access failed")
+        {
             return Some(ip);
         }
         None
@@ -57,12 +73,13 @@ pub struct ReverseProxy {
 }
 
 impl ReverseProxy {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, database: Database) -> Self {
         Self {
             listen: config.listen,
             resolve: config.resolve,
             inner: Arc::new(Mutex::new(ProxyInner {
                 config: config.firewall,
+                database,
             })),
         }
     }

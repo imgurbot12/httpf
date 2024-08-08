@@ -8,7 +8,7 @@ port = 9000
 
 [firewall]
 trust_proxy_headers = true
-trusted_headers = ['cf-connecting-ip']
+trusted_headers = ['cf-connecting-ip', 'x-real-ip']
 
 blacklist = ['1.2.3.4']
 whitelist = ['127.0.0.1']
