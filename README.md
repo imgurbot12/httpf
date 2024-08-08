@@ -13,6 +13,12 @@ Dead Simple HTTP Reverse Proxy Firewall.
   - Stupid Easy IP Whitelist/Blacklist
   - Simple Fail2Ban Integration
 
+### Install
+
+```bash
+$ cargo install --path .
+```
+
 ### Quick Start
 
 1. Configure `config.toml` to specify your listener, protected resolution,
