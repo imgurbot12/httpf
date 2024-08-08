@@ -3,16 +3,18 @@
 use std::{net::IpAddr, str::FromStr};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, DurationRound, TimeDelta, Utc};
 use rusqlite::{Connection, OptionalExtension};
 
 static SCHEMA: &'static str = include_str!("./sql/schema.sql");
 static INSERT_WHITELIST: &'static str = "INSERT INTO Whitelist VALUES (?1, ?2)";
 static INSERT_BLACKLIST: &'static str = "INSERT INTO Blacklist VALUES (?1, ?2)";
+static UPDATE_WHITELIST: &'static str = "UPDATE Whitelist SET Expires=?2 WHERE IpAddr=?1";
+static UPDATE_BLACKLIST: &'static str = "UPDATE Blacklist SET Expires=?2 WHERE IpAddr=?1";
 static REMOVE_WHITELIST: &'static str = "DELETE FROM Whitelist WHERE IpAddr=?1";
 static REMOVE_BLACKLIST: &'static str = "DELETE FROM Blacklist WHERE IpAddr=?1";
 static CLEAN_WHITELIST: &'static str = "DELETE FROM Whitelist WHERE Expires<=?1";
-static CLEAN_BLACKLIST: &'static str = "DELETE FROM Whitelist WHERE Expires<=?1";
+static CLEAN_BLACKLIST: &'static str = "DELETE FROM Blacklist WHERE Expires<=?1";
 
 static LIST_WHITELIST: &'static str = "SELECT * FROM Whitelist";
 static LIST_BLACKLIST: &'static str = "SELECT * FROM Blacklist";
@@ -45,19 +47,25 @@ impl Database {
     }
     pub fn add_whitelist(&self, ip: &IpAddr, expires: Option<DateTime<Utc>>) -> Result<bool> {
         if self.whitelist_contains(ip)? {
+            self.conn
+                .execute(UPDATE_WHITELIST, (&ip.to_string(), &round(expires)))
+                .context("update whitelist failed")?;
             return Ok(false);
         }
         self.conn
-            .execute(INSERT_WHITELIST, (&ip.to_string(), &expires))
+            .execute(INSERT_WHITELIST, (&ip.to_string(), &round(expires)))
             .context("insert into whitelist failed")?;
         Ok(true)
     }
     pub fn add_blacklist(&self, ip: &IpAddr, expires: Option<DateTime<Utc>>) -> Result<bool> {
         if self.blacklist_contains(ip)? {
+            self.conn
+                .execute(UPDATE_BLACKLIST, (&ip.to_string(), &round(expires)))
+                .context("update whitelist failed")?;
             return Ok(false);
         }
         self.conn
-            .execute(INSERT_BLACKLIST, (&ip.to_string(), &expires))
+            .execute(INSERT_BLACKLIST, (&ip.to_string(), &round(expires)))
             .context("insert into whitelist failed")?;
         Ok(true)
     }
@@ -109,7 +117,7 @@ impl Database {
             })
             .into_iter()
             .flatten()
-            .filter_map(|r| r.ok())
+            .map(|r| r.unwrap())
             .collect();
         Ok(entries)
     }
@@ -129,7 +137,7 @@ impl Database {
             })
             .into_iter()
             .flatten()
-            .filter_map(|r| r.ok())
+            .map(|r| r.unwrap())
             .collect();
         Ok(entries)
     }
@@ -138,5 +146,15 @@ impl Database {
 #[derive(Debug)]
 pub struct ListEntry {
     pub ip: IpAddr,
-    pub expires: Option<NaiveDateTime>,
+    pub expires: Option<DateTime<Utc>>,
+}
+
+fn round(utc: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+    match utc {
+        None => None,
+        Some(utc) => Some(
+            utc.duration_round(TimeDelta::seconds(1))
+                .expect("failed to round datetime"),
+        ),
+    }
 }

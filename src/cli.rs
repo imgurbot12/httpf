@@ -1,18 +1,25 @@
-use std::{net::IpAddr, path::PathBuf};
+use std::net::IpAddr;
+use std::ops::Add;
+use std::path::PathBuf;
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, TimeDelta, Utc};
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
 
-use crate::{
-    config::Config,
-    database::{Database, ListEntry},
-};
+use crate::config::Config;
+use crate::database::{Database, ListEntry};
+
+#[derive(Debug, Clone)]
+pub struct Expiration(pub DateTime<Utc>);
 
 #[derive(Debug, Args)]
 pub struct AddArgs {
     /// IpAddress to add to list
     ip: IpAddr,
+    /// Expiration Configuration
+    expr: Option<Expiration>,
 }
 
 #[derive(Debug, Args)]
@@ -76,6 +83,7 @@ impl ListCommand {
             .max()
             .unwrap()
             + 1;
+        let now = Utc::now();
         for (n, entry) in entries.into_iter().enumerate() {
             // calculate number to ip buffer
             let n = (n + 1).to_string();
@@ -87,7 +95,9 @@ impl ListCommand {
             let buff2: String = (0..blen2).into_iter().map(|_| " ").collect();
             let expr = entry
                 .expires
-                .map(|e| e.to_string())
+                .map(|e| e.signed_duration_since(now).num_seconds() as u64)
+                .map(|s| std::time::Duration::from_secs(s))
+                .map(|d| humantime::Duration::from(d).to_string())
                 .unwrap_or_else(|| "never".to_owned());
             println!("{n}.{buff1}{ip}{buff2}(expires: {expr})");
         }
@@ -99,13 +109,14 @@ impl ListCommand {
         let f = format!("[{}]", "!".bold().red());
         match self {
             Self::Add(args) => {
-                let result = database.add_whitelist(&args.ip, None)?;
+                let expr = args.expr.clone().map(|e| e.0);
+                let result = database.add_whitelist(&args.ip, expr)?;
                 let ip = args.ip.to_string().italic();
                 match result {
                     true => println!("{s} {ip} added to {name}."),
-                    false => println!("{f} {ip} {} in {name}.", "already".italic().red()),
+                    false => println!("{f} {ip} {} in {name}.", "expiration updated".italic()),
                 }
-                Ok(result)
+                Ok(true)
             }
             Self::Remove(args) => {
                 let result = database.remove_whitelist(&args.ip)?;
@@ -121,7 +132,7 @@ impl ListCommand {
                 let ip = args.ip.to_string().italic();
                 match result {
                     true => println!("{s} {ip} in {name}."),
-                    false => println!("{f} {ip} {} from {name}.", "missing".italic().red()),
+                    false => println!("{s} {ip} {} from {name}.", "missing".italic().red()),
                 }
                 Ok(result)
             }
@@ -144,12 +155,13 @@ impl ListCommand {
                     println!("{f} {ip} in {wl}. {cannot} add to {name}.");
                     return Ok(false);
                 }
-                let result = database.add_blacklist(&args.ip, None)?;
+                let expr = args.expr.clone().map(|e| e.0);
+                let result = database.add_blacklist(&args.ip, expr)?;
                 match result {
                     true => println!("{s} {ip} added to {name}"),
-                    false => println!("{f} {ip} {} in {name}.", "already".italic().red()),
+                    false => println!("{s} {ip} {} in {name}.", "expiration updated".italic()),
                 }
-                Ok(result)
+                Ok(true)
             }
             Self::Remove(args) => {
                 let result = database.remove_blacklist(&args.ip)?;
@@ -174,5 +186,20 @@ impl ListCommand {
                 Ok(self.print_entries(entries))
             }
         }
+    }
+}
+
+impl FromStr for Expiration {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if let Ok(date) = DateTime::from_str(s) {
+            return Ok(Self(date));
+        }
+        if let Ok(duration) = humantime::Duration::from_str(s) {
+            let duration = TimeDelta::seconds(duration.as_secs() as i64);
+            let date = Utc::now().add(duration);
+            return Ok(Self(date));
+        }
+        Err(format!("invalid expiration: {s:?}"))
     }
 }
