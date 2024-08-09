@@ -5,7 +5,7 @@ Dead Simple HTTP Reverse Proxy Firewall.
 
 <!--
   DONE: implement expiration into cli and active db entry
-  TODO: close connection if keep-alive is not specified? 
+  TODO: close connection if keep-alive is not specified?
   TODO: document fail2ban implementation
   TODO: implement memory cache for sqlite entries?
   TODO: implement connection pooling for client address?
@@ -46,7 +46,14 @@ blacklist = []
 whitelist = ['127.0.0.1']
 
 # database filepath
-database = '/var/lib/httpf/httpf.db'
+database = 'httpf.db'
+
+# nginx style matchers for denying/allowing access per ip
+# https://www.digitalocean.com/community/tutorials/nginx-location-directive
+[[controls]]
+path  = '/example'
+allow = ['127.0.0.1']
+deny  = ['all']
 ```
 
 2. Run httpf:

@@ -17,9 +17,9 @@ whitelist = ['127.0.0.1']
 # database filepath
 database = 'httpf.db'
 
-# nginx style matchers (https://www.digitalocean.com/community/tutorials/nginx-location-directive)
-# for denying/allowing access per ip
+# nginx style matchers for denying/allowing access per ip
+# https://www.digitalocean.com/community/tutorials/nginx-location-directive
 [[controls]]
-path  = '/api'
+path  = '/example'
 allow = ['127.0.0.1']
 deny  = ['all']
