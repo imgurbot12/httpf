@@ -32,14 +32,17 @@ static PROXY_HEADERS: [&str; 6] = [
 type ProxyRequest = Request<hyper::body::Incoming>;
 type ProxyResponse = Response<BoxBody<Bytes, hyper::Error>>;
 type ProxyResult = Result<ProxyResponse, hyper::Error>;
+type Determination = (bool, IpAddr);
 
 struct ProxyInner {
     config: FirewallConfig,
+    controls: Vec<ControlConfig>,
     database: Database,
 }
 
 impl ProxyInner {
-    pub fn is_blocked(&self, ip: IpAddr) -> Option<IpAddr> {
+    // check if globally allowed/rejected
+    fn global_is_blocked(&self, ip: IpAddr) -> Option<IpAddr> {
         if self.config.whitelist.contains(&ip) {
             return None;
         }
@@ -62,6 +65,49 @@ impl ProxyInner {
         }
         None
     }
+    pub fn is_blocked(&self, mut addr: IpAddr, req: &ProxyRequest) -> Determination {
+        // determine global ip allow/deny
+        let mut ips = vec![addr];
+        let mut blocked = self.global_is_blocked(addr);
+        if self.config.trust_proxy_headers {
+            let headers = req.headers();
+            let proxy_ips = get_forward_ip(headers, &self.config.trusted_headers);
+            if !proxy_ips.is_empty() {
+                addr = proxy_ips[0];
+                if blocked.is_none() {
+                    blocked = proxy_ips
+                        .clone()
+                        .into_iter()
+                        .find(|ip| self.global_is_blocked(*ip).is_some());
+                }
+                ips.extend(proxy_ips.into_iter());
+            }
+        }
+        log::trace!("global ip block? {blocked:?}");
+        // determine if path is blocked
+        if blocked.is_none() {
+            let path = req.uri().path();
+            for control in self.controls.iter() {
+                if !control.matches_path(path) {
+                    log::trace!("evaluating control {control:?} (path: {path})");
+                    continue;
+                }
+                if control.match_allow(&addr) {
+                    log::trace!("{addr} allowed for {control:?} (path: {path})");
+                    continue;
+                }
+                if let Some(ip) = control.match_deny_any(&ips) {
+                    log::debug!("{ip} blocked due to {control:?} (path: {path})");
+                    blocked = Some(ip);
+                    break;
+                }
+            }
+        }
+        match blocked {
+            Some(addr) => (true, addr),
+            None => (false, addr),
+        }
+    }
 }
 
 type Inner = Arc<Mutex<ProxyInner>>;
@@ -79,6 +125,7 @@ impl ReverseProxy {
             resolve: config.resolve,
             inner: Arc::new(Mutex::new(ProxyInner {
                 config: config.firewall,
+                controls: config.controls,
                 database,
             })),
         }
@@ -106,33 +153,19 @@ impl ReverseProxy {
             let proxy_fn = service_fn(move |req| {
                 // check if native ip or forwarded ip should be accepted/rejected
                 let src = addr.ip();
-                let mut real = src.clone();
-                let headers = req.headers();
                 let inner = inner.lock().expect("failed mutex lock");
-                let mut blocked = inner.is_blocked(src);
-                if inner.config.trust_proxy_headers {
-                    let ips = get_forward_ip(headers, &inner.config.trusted_headers);
-                    if !ips.is_empty() {
-                        real = ips[0];
-                    }
-                    if blocked.is_none() {
-                        blocked = ips.into_iter().find(|ip| inner.is_blocked(*ip).is_some());
-                    }
-                }
+                let (block, real) = inner.is_blocked(src.clone(), &req);
                 // handle forwarding request
                 let config = config.clone();
                 async move {
                     let uri = req.uri();
                     let method = req.method();
-                    match blocked {
-                        None => {
-                            log::info!("[ACCEPT] {real} (from: {src}) {method} {uri}");
-                            proxy(config, req).await
-                        }
-                        Some(real) => {
-                            log::warn!("[REJECT] {real} (from: {src}) {method} {uri}");
-                            Ok(blocked_response())
-                        }
+                    if block {
+                        log::warn!("[REJECT] {real} (from: {src}) {method} {uri}");
+                        Ok(blocked_response())
+                    } else {
+                        log::info!("[ACCEPT] {real} (from: {src}) {method} {uri}");
+                        proxy(config, req).await
                     }
                 }
             });

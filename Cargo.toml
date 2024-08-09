@@ -15,8 +15,10 @@ http = "1.1.0"
 http-body-util = "0.1.2"
 humantime = "2.1.0"
 hyper = { version = "1.4.1", features = ["client", "http1", "server"] }
+ipnet = { version = "2.9.0", features = ["serde"] }
 log = "0.4.22"
 pin-project-lite = "0.2.14"
+regex = "1.10.6"
 rusqlite = { version = "0.32.1", features = ["chrono"] }
 serde = { version = "1.0.204", features = ["derive"] }
 tokio = { version = "1.39.2", features = ["io-util", "macros", "net", "rt-multi-thread"] }

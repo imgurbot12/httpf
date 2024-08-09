@@ -15,4 +15,11 @@ blacklist = []
 whitelist = ['127.0.0.1']
 
 # database filepath
-database = '/var/lib/httpf/httpf.db'
+database = 'httpf.db'
+
+# nginx style matchers (https://www.digitalocean.com/community/tutorials/nginx-location-directive)
+# for denying/allowing access per ip
+[[controls]]
+path  = '/api'
+allow = ['127.0.0.1']
+deny  = ['all']
