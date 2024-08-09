@@ -80,7 +80,8 @@ impl ProxyInner {
                         .into_iter()
                         .find(|ip| self.global_is_blocked(*ip).is_some());
                 }
-                ips.extend(proxy_ips.into_iter());
+                ips.insert(0, addr);
+                ips.extend(proxy_ips.into_iter().skip(1));
             }
         }
         log::trace!("global ip block? {blocked:?}");
