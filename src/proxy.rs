@@ -9,12 +9,14 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderValue};
 use http_body_util::Full;
 use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::client::conn::http1::Builder;
+use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
+use hyper_util::client::legacy::connect::{dns::GaiResolver, HttpConnector};
+use hyper_util::client::legacy::Client;
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 
 use crate::config::*;
 use crate::database::Database;
@@ -29,9 +31,11 @@ static PROXY_HEADERS: [&str; 6] = [
     "x-forwarded-for",
 ];
 
-type ProxyRequest = Request<hyper::body::Incoming>;
+type ProxyRequest = Request<Incoming>;
 type ProxyResponse = Response<BoxBody<Bytes, hyper::Error>>;
-type ProxyResult = Result<ProxyResponse, hyper::Error>;
+type ProxyResult = Result<ProxyResponse, anyhow::Error>;
+type ProxyClient = Client<HttpConnector<GaiResolver>, Incoming>;
+
 type Determination = (bool, IpAddr);
 
 struct ProxyInner {
@@ -135,6 +139,9 @@ impl ReverseProxy {
     pub async fn run(&self) -> Result<()> {
         let addr = SocketAddr::from((self.listen.host, self.listen.port));
 
+        let client: ProxyClient =
+            Client::builder(hyper_util::rt::TokioExecutor::new()).build(HttpConnector::new());
+
         let listener = TcpListener::bind(addr)
             .await
             .context("failed to bind tcp listener")?;
@@ -151,6 +158,7 @@ impl ReverseProxy {
             // build proxy handler function
             let inner = Arc::clone(&self.inner);
             let config = self.resolve.clone();
+            let client = client.clone();
             let proxy_fn = service_fn(move |req| {
                 // check if native ip or forwarded ip should be accepted/rejected
                 let src = addr.ip();
@@ -158,6 +166,7 @@ impl ReverseProxy {
                 let (block, real) = inner.is_blocked(src.clone(), &req);
                 // handle forwarding request
                 let config = config.clone();
+                let client = client.clone();
                 async move {
                     let uri = req.uri();
                     let method = req.method();
@@ -166,7 +175,7 @@ impl ReverseProxy {
                         Ok(blocked_response())
                     } else {
                         log::info!("[ACCEPT] {real} (from: {src}) {method} {uri}");
-                        proxy(config, req).await
+                        proxy(config, client, req).await
                     }
                 }
             });
@@ -252,34 +261,32 @@ fn blocked_response() -> ProxyResponse {
         .expect("invalid block response")
 }
 
-pub async fn proxy(config: ResolveConfig, mut req: ProxyRequest) -> ProxyResult {
-    // modify HOST header
+pub async fn proxy(
+    config: ResolveConfig,
+    client: ProxyClient,
+    mut req: ProxyRequest,
+) -> ProxyResult {
+    // update request URI
     let host = format!("{}:{}", config.host, config.port);
+    *req.uri_mut() = format!(
+        "http://{host}{}",
+        req.uri()
+            .path_and_query()
+            .map(|x| x.as_str())
+            .unwrap_or("/")
+    )
+    .parse()
+    .expect("invalid request uri");
+    // modify HOST header
     let headers = req.headers_mut();
     headers.insert(
         http::header::HOST,
         HeaderValue::from_str(&host).expect("invalid host header"),
     );
-
-    // connec to socket with designated host/port
-    let stream = TcpStream::connect((config.host, config.port))
+    // make request
+    let res = client
+        .request(req)
         .await
-        .unwrap();
-    let io = TokioIo::new(stream);
-
-    // build sender and check connection
-    let (mut sender, conn) = Builder::new()
-        .preserve_header_case(true)
-        .title_case_headers(true)
-        .handshake(io)
-        .await?;
-    tokio::task::spawn(async move {
-        if let Err(err) = conn.await {
-            log::error!("Connection failed: {:?}", err);
-        }
-    });
-
-    // send request and return response
-    let resp = sender.send_request(req).await?;
-    Ok(resp.map(|b| b.boxed()))
+        .context("forwarded http request failed")?;
+    Ok(res.map(|b| b.boxed()))
 }

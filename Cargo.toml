@@ -14,7 +14,8 @@ env_logger = "0.11.5"
 http = "1.1.0"
 http-body-util = "0.1.2"
 humantime = "2.1.0"
-hyper = { version = "1.4.1", features = ["client", "http1", "server"] }
+hyper = { version = "1.4.1", features = ["http1", "server"] }
+hyper-util = { version = "0.1.7", features = ["client-legacy", "http1"] }
 ipnet = { version = "2.9.0", features = ["serde"] }
 log = "0.4.22"
 pin-project-lite = "0.2.14"

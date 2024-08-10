@@ -11,6 +11,7 @@ pub struct Config {
     pub listen: ListenConfig,
     pub resolve: ResolveConfig,
     pub firewall: FirewallConfig,
+    #[serde(default)]
     pub controls: Vec<ControlConfig>,
 }
 
