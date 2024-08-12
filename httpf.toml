@@ -6,16 +6,16 @@ port = 8001        # httpf listener port
 host = 'example.com' # protected resource that valid requests resolve to
 port = 80            # port of host to connect to
 
-[firewall]
-trust_proxy_headers = false # useful if httpf is behind another proxy
-trusted_headers = ['cf-connecting-ip', 'x-real-ip'] # only allow headers u trust
+# useful if httpf is behind another proxy (only allow headers u trust)
+[proxy]
+trust_proxy_headers = false
+trusted_headers = ['cf-connecting-ip', 'x-real-ip']
 
 # permanant and cached blacklist/whitelist entries
+[firewall]
 blacklist = []
 whitelist = ['127.0.0.1']
-
-# database filepath
-database = 'httpf.db'
+database  = 'httpf.db'
 
 # nginx style matchers for denying/allowing access per ip
 # https://www.digitalocean.com/community/tutorials/nginx-location-directive

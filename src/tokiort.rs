@@ -1,4 +1,6 @@
 //! Implementation Stolen from https://github.com/hyperium/hyper/blob/master/benches/support/tokiort.rs
+//! LICENSE: https://github.com/hyperium/hyper/blob/master/LICENSE (MIT)
+
 use std::pin::Pin;
 use std::task::{Context, Poll};
 

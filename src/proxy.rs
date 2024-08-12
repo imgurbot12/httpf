@@ -1,4 +1,5 @@
 //! Implementation Stolen and Customized from https://github.com/hyperium/hyper/blob/master/examples/http_proxy.rs
+//! LICENSE: https://github.com/hyperium/hyper/blob/master/LICENSE (MIT)
 
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -17,9 +18,11 @@ use hyper_util::client::legacy::connect::{dns::GaiResolver, HttpConnector};
 use hyper_util::client::legacy::Client;
 
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 
 use crate::config::*;
 use crate::database::Database;
+use crate::tls::{setup_tls, UniversalTcpStream};
 use crate::tokiort::TokioIo;
 
 static PROXY_HEADERS: [&str; 6] = [
@@ -39,7 +42,8 @@ type ProxyClient = Client<HttpConnector<GaiResolver>, Incoming>;
 type Determination = (bool, IpAddr);
 
 struct ProxyInner {
-    config: FirewallConfig,
+    proxy: ProxyConfig,
+    firewall: FirewallConfig,
     controls: Vec<ControlConfig>,
     database: Database,
 }
@@ -47,10 +51,10 @@ struct ProxyInner {
 impl ProxyInner {
     // check if globally allowed/rejected
     fn global_is_blocked(&self, ip: IpAddr) -> Option<IpAddr> {
-        if self.config.whitelist.contains(&ip) {
+        if self.firewall.whitelist.contains(&ip) {
             return None;
         }
-        if self.config.blacklist.contains(&ip) {
+        if self.firewall.blacklist.contains(&ip) {
             return Some(ip);
         }
         if self
@@ -73,9 +77,9 @@ impl ProxyInner {
         // determine global ip allow/deny
         let mut ips = vec![addr];
         let mut blocked = self.global_is_blocked(addr);
-        if self.config.trust_proxy_headers {
+        if self.proxy.trust_proxy_headers {
             let headers = req.headers();
-            let proxy_ips = get_forward_ip(headers, &self.config.trusted_headers);
+            let proxy_ips = get_forward_ip(headers, &self.proxy.trusted_headers);
             if !proxy_ips.is_empty() {
                 addr = proxy_ips[0];
                 if blocked.is_none() {
@@ -129,14 +133,23 @@ impl ReverseProxy {
             listen: config.listen,
             resolve: config.resolve,
             inner: Arc::new(Mutex::new(ProxyInner {
-                config: config.firewall,
+                proxy: config.proxy,
+                firewall: config.firewall,
                 controls: config.controls,
                 database,
             })),
         }
     }
 
+    fn setup_tls(&self) -> Result<Option<TlsAcceptor>> {
+        match self.listen.tls.as_ref() {
+            Some(config) => Ok(Some(setup_tls(config)?)),
+            None => Ok(None),
+        }
+    }
+
     pub async fn run(&self) -> Result<()> {
+        let tls = self.setup_tls()?;
         let addr = SocketAddr::from((self.listen.host, self.listen.port));
 
         let client: ProxyClient =
@@ -145,13 +158,27 @@ impl ReverseProxy {
         let listener = TcpListener::bind(addr)
             .await
             .context("failed to bind tcp listener")?;
-        log::info!("Listening on http://{addr}");
+
+        let scheme = if tls.is_some() { "https" } else { "http" };
+        log::info!("Listening on {scheme}://{addr}");
 
         loop {
+            // accept incoming connection
             let (stream, addr) = listener
                 .accept()
                 .await
                 .context("failed to accept client socket")?;
+
+            // unencrypt with tls if tls config is present
+            let stream = match UniversalTcpStream::new(stream, tls.as_ref()).await {
+                Ok(stream) => stream,
+                Err(err) => {
+                    log::error!("{addr} tls error: {err:?}");
+                    continue;
+                }
+            };
+
+            // wrap stream in hyper handler for io
             let io = TokioIo::new(stream);
             log::debug!("New Connection {addr:?}");
 

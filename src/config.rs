@@ -2,39 +2,57 @@
 
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::{de::Error, Deserialize};
 
+/// Complete Httpf Configuration
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
     pub resolve: ResolveConfig,
+    pub proxy: ProxyConfig,
     pub firewall: FirewallConfig,
     #[serde(default)]
     pub controls: Vec<ControlConfig>,
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TlsConfig {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+}
+
+/// Server Listener Configuration
+#[derive(Debug, Deserialize)]
 pub struct ListenConfig {
     pub host: IpAddr,
     pub port: u16,
+    pub tls: Option<TlsConfig>,
 }
 
+/// Reverse Proxy Resolution Configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResolveConfig {
     pub host: String,
     pub port: u16,
 }
 
-pub type IpList = HashSet<IpAddr>;
-pub type TrustedHeaders = Option<HashSet<String>>;
-
+/// Additional Proxy Configuration
 #[derive(Debug, Deserialize)]
-pub struct FirewallConfig {
+pub struct ProxyConfig {
     pub trust_proxy_headers: bool,
     #[serde(default)]
     pub trusted_headers: TrustedHeaders,
+}
+
+pub type IpList = HashSet<IpAddr>;
+pub type TrustedHeaders = Option<HashSet<String>>;
+
+/// Basic Firewall Configuration
+#[derive(Debug, Deserialize)]
+pub struct FirewallConfig {
     #[serde(default)]
     pub whitelist: IpList,
     #[serde(default)]
@@ -43,6 +61,7 @@ pub struct FirewallConfig {
     pub database: Option<String>,
 }
 
+/// Firewall Action Control Configuration Component
 #[derive(Debug, Deserialize)]
 pub struct ControlConfig {
     #[serde(alias = "match")]
@@ -72,6 +91,7 @@ impl ControlConfig {
     }
 }
 
+/// Regex Based HTTP Path Matcher
 #[derive(Debug)]
 pub struct PathMatch(pub regex::Regex);
 
@@ -95,6 +115,7 @@ impl FromStr for PathMatch {
     }
 }
 
+/// Client IP Matcher Rule
 #[derive(Debug)]
 pub enum ControlMatch {
     All,

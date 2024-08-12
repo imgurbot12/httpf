@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod database;
 mod proxy;
+mod tls;
 mod tokiort;
 
 use cli::{Cli, Command};
