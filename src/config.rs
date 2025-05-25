@@ -11,7 +11,7 @@ use serde::{de::Error, Deserialize};
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
-    pub resolve: ResolveConfig,
+    pub resolve: Vec<url::Url>,
     pub proxy: ProxyConfig,
     pub firewall: FirewallConfig,
     #[serde(default)]
@@ -32,17 +32,10 @@ pub struct ListenConfig {
     pub tls: Option<TlsConfig>,
 }
 
-/// Reverse Proxy Resolution Configuration
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResolveConfig {
-    pub host: String,
-    pub port: u16,
-}
-
 /// Additional Proxy Configuration
 #[derive(Debug, Deserialize)]
 pub struct ProxyConfig {
-    pub trust_proxy_headers: bool,
+    pub trust_headers: bool,
     #[serde(default)]
     pub trusted_headers: TrustedHeaders,
 }

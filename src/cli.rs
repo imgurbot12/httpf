@@ -65,12 +65,12 @@ pub struct Cli {
 impl Cli {
     pub fn read_config(&self) -> Result<Config> {
         let paths = vec![
-            PathBuf::from("./httpf.toml"),
+            PathBuf::from("./httpf.yaml"),
             dirs::config_dir()
                 .expect("failed to find config dir")
-                .join("httpf.toml"),
-            PathBuf::from("/etc/httpf.toml"),
-            PathBuf::from("/var/lib/httpf/httpf.toml"),
+                .join("httpf.yaml"),
+            PathBuf::from("/etc/httpf.yaml"),
+            PathBuf::from("/var/lib/httpf/httpf.yaml"),
         ];
         let mut config = self.config.clone();
         if config.is_none() {
@@ -81,7 +81,7 @@ impl Cli {
             Some(config) => {
                 let content =
                     std::fs::read_to_string(config).context("failed to read config file")?;
-                toml::from_str(&content).context("invalid configuration")
+                serde_yaml::from_str(&content).context("invalid configuration")
             }
         }
     }
