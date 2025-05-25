@@ -17,3 +17,19 @@ firewall:
   database:  'httpf.db'
   blacklist: []
   whitelist: ['127.0.0.1']
+
+# block & ratelimit access rules
+controls:
+
+  - path: '/'
+    match: ['1.2.3.4', '1.2.4.0/24']
+    action:
+      type: 'block'
+
+  # nginx style matchers for denying/allowing access per ip
+  # https://www.digitalocean.com/community/tutorials/nginx-location-directive
+  - path: '= /limit'
+    match: ['all']
+    action:
+      type:  'ratelimit'
+      limit: 30 # requests/second

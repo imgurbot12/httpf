@@ -27,7 +27,7 @@ mod tokiort;
 
 use crate::config::*;
 use crate::database::Database;
-use crate::engine::Engine;
+use crate::engine::{Engine, Ruling};
 use tls::{setup_tls, UniversalTcpStream};
 use tokiort::TokioIo;
 
@@ -51,15 +51,10 @@ impl ReverseProxy {
             panic!("resolution list must not be empty");
         }
         Self {
-            listen: config.listen,
-            resolve: config.resolve,
+            listen: config.listen.clone(),
+            resolve: config.resolve.clone(),
             rotation: 0,
-            inner: Arc::new(Mutex::new(Engine {
-                proxy: config.proxy,
-                firewall: config.firewall,
-                controls: config.controls,
-                database,
-            })),
+            inner: Arc::new(Mutex::new(Engine::new(config, database))),
         }
     }
 
@@ -126,20 +121,29 @@ impl ReverseProxy {
             let proxy_fn = service_fn(move |req| {
                 // check if native ip or forwarded ip should be accepted/rejected
                 let src = addr.ip();
-                let inner = inner.lock().expect("failed mutex lock");
-                let (block, real) = inner.is_blocked(src.clone(), &req);
+                let rule = {
+                    let mut inner = inner.lock().expect("failed mutex lock");
+                    inner.is_blocked(src.clone(), &req)
+                };
                 // handle forwarding request
                 let config = base_url.clone();
                 let client = Arc::clone(&client);
                 async move {
                     let uri = req.uri();
                     let method = req.method();
-                    if block {
-                        log::warn!("[REJECT] {real} (from: {src}) {method} {uri}");
-                        Ok(blocked_response())
-                    } else {
-                        log::info!("[ACCEPT] {real} (from: {src}) {method} {uri}");
-                        proxy(config, client, req).await
+                    match rule {
+                        Ruling::Allow { ip, reason } => {
+                            log::info!(
+                                "[ACCEPT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
+                            );
+                            proxy(config, client, req).await
+                        }
+                        Ruling::Deny { ip, reason, code } => {
+                            log::warn!(
+                                "[REJECT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
+                            );
+                            Ok(blocked_response(code))
+                        }
                     }
                 }
             });
@@ -168,10 +172,15 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
 }
 
 #[inline]
-fn blocked_response() -> ProxyResponse {
+fn blocked_response(code: u16) -> ProxyResponse {
+    let status = http::StatusCode::from_u16(code).expect("invalid http code");
+    let reason = status
+        .canonical_reason()
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| format!("{code} Request Denied"));
     Response::builder()
-        .status(403)
-        .body(full("403 Request Denied"))
+        .status(status)
+        .body(full(reason))
         .expect("invalid block response")
 }
 

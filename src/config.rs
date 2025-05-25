@@ -18,14 +18,14 @@ pub struct Config {
     pub controls: Vec<ControlConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TlsConfig {
     pub cert: PathBuf,
     pub key: PathBuf,
 }
 
 /// Server Listener Configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ListenConfig {
     pub host: IpAddr,
     pub port: u16,
@@ -54,13 +54,28 @@ pub struct FirewallConfig {
     pub database: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Action {
+    #[default]
+    Block,
+    Ratelimit {
+        limit: usize,
+        #[serde(default)]
+        global: bool,
+    },
+}
+
 /// Firewall Action Control Configuration Component
 #[derive(Debug, Deserialize)]
 pub struct ControlConfig {
-    #[serde(alias = "match")]
     pub path: PathMatch,
-    pub allow: Vec<ControlMatch>,
-    pub deny: Vec<ControlMatch>,
+    #[serde(default)]
+    pub skip: Vec<ControlMatch>,
+    #[serde(default, alias = "match")]
+    pub matches: Vec<ControlMatch>,
+    #[serde(default)]
+    pub action: Action,
 }
 
 impl ControlConfig {
@@ -69,12 +84,12 @@ impl ControlConfig {
         self.path.0.is_match(path)
     }
     #[inline]
-    pub fn match_allow(&self, ip: &IpAddr) -> bool {
-        self.allow.iter().find(|rule| rule.contains(ip)).is_some()
+    pub fn match_skip(&self, ip: &IpAddr) -> bool {
+        self.skip.iter().find(|rule| rule.contains(ip)).is_some()
     }
     #[inline]
     pub fn match_deny(&self, ip: &IpAddr) -> bool {
-        self.deny.iter().find(|rule| rule.contains(ip)).is_some()
+        self.matches.iter().find(|rule| rule.contains(ip)).is_some()
     }
     #[inline]
     pub fn match_deny_any(&self, ips: &Vec<IpAddr>) -> Option<IpAddr> {

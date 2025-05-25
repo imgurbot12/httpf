@@ -3,14 +3,6 @@ httpf
 
 Dead Simple HTTP Reverse Proxy Firewall.
 
-<!--
-  DONE: implement expiration into cli and active db entry
-  TODO: close connection if keep-alive is not specified?
-  TODO: document fail2ban implementation
-  TODO: implement memory cache for sqlite entries?
-  TODO: implement connection pooling for client address?
--->
-
 ### Features:
   - Blazingly Fast 🔥
   - Simple and Easy Reverse Proxy
@@ -25,36 +17,45 @@ $ cargo install --path .
 
 ### Quick Start
 
-1. Configure `httpf.toml` to specify your listener, protected resolution,
+1. Configure `httpf.yaml` to specify your listener, protected resolution,
 and firewall options.
 
-```toml
-[listen]
-host = '127.0.0.1' # httpf listener host
-port = 8001        # httpf listener port
+```yaml
+---
+listen:
+  host: '127.0.0.1' # httpf listener host
+  port: 8001        # httpf listener port
 
-[resolve]
-host = 'example.com' # protected resource that valid requests resolve to
-port = 80            # port of host to connect to
+# protected resources that valid requests resolve to
+resolve:
+  - https://example.com
 
-# useful if httpf is behind another proxy (only allow headers u trust)
-[proxy]
-trust_proxy_headers = false
-trusted_headers = ['cf-connecting-ip', 'x-real-ip']
+# useful if httpf is behind another proxy (only allow headers you trust)
+proxy:
+  trust_headers:   false
+  trusted_headers: ['cf-connecting-ip']
 
-# permanant and cached blacklist/whitelist entries
-[firewall]
-blacklist = []
-whitelist = ['127.0.0.1']
-database  = 'httpf.db'
+# permanent and cached blacklist/whitelist entries
+firewall:
+  database:  'httpf.db'
+  blacklist: []
+  whitelist: ['127.0.0.1']
 
-# nginx style matchers for denying/allowing access per ip
-# https://www.digitalocean.com/community/tutorials/nginx-location-directive
-[[controls]]
-path  = '/example'
-allow = ['127.0.0.1']
-deny  = ['all']
+# block & ratelimit access rules
+controls:
 
+  - path: '/'
+    match: ['1.2.3.4', '1.2.4.0/24']
+    action:
+      type: 'block'
+
+  # nginx style matchers for denying/allowing access per ip
+  # https://www.digitalocean.com/community/tutorials/nginx-location-directive
+  - path: '= /limit'
+    match: ['all']
+    action:
+      type:  'ratelimit'
+      limit: 30 # requests/second
 ```
 
 2. Run httpf:

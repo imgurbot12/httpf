@@ -1,87 +1,148 @@
 use std::net::IpAddr;
 
-use crate::config::{ControlConfig, FirewallConfig, ProxyConfig};
+use crate::config::*;
 use crate::database::Database;
 use crate::proxy::ProxyRequest;
 
 mod headers;
+mod ratelimit;
 
-pub type Determination = (bool, IpAddr);
+#[derive(Debug)]
+pub enum Ruling {
+    Allow {
+        ip: IpAddr,
+        reason: String,
+    },
+    Deny {
+        ip: IpAddr,
+        reason: String,
+        code: u16,
+    },
+}
+
+impl Ruling {
+    #[inline]
+    fn allow(ipaddr: IpAddr, reason: &str) -> Self {
+        Self::Allow {
+            ip: ipaddr,
+            reason: reason.to_owned(),
+        }
+    }
+    #[inline]
+    fn block(ipaddr: IpAddr, reason: &str, code: u16) -> Self {
+        Self::Deny {
+            ip: ipaddr,
+            code,
+            reason: reason.to_owned(),
+        }
+    }
+}
 
 pub struct Engine {
-    pub proxy: ProxyConfig,
-    pub firewall: FirewallConfig,
-    pub controls: Vec<ControlConfig>,
-    pub database: Database,
+    proxy: ProxyConfig,
+    firewall: FirewallConfig,
+    controls: Vec<ControlConfig>,
+    database: Database,
+    ratelimit: ratelimit::RateLimiterGroup,
 }
 
 impl Engine {
-    // check if globally allowed/rejected
-    fn global_is_blocked(&self, ip: IpAddr) -> Option<IpAddr> {
-        if self.firewall.whitelist.contains(&ip) {
-            return None;
+    pub fn new(config: Config, database: Database) -> Self {
+        let mut ratelimit = ratelimit::RateLimiterGroup::default();
+        for (rule_num, control) in config.controls.iter().enumerate() {
+            if let Action::Ratelimit { limit, global } = control.action {
+                ratelimit.register(rule_num, limit, global);
+            }
         }
-        if self.firewall.blacklist.contains(&ip) {
-            return Some(ip);
+        Self {
+            proxy: config.proxy,
+            firewall: config.firewall,
+            controls: config.controls,
+            database,
+            ratelimit,
+        }
+    }
+
+    /// Retrieve all IPs associated with request
+    #[inline]
+    fn get_ips(&self, addr: IpAddr, req: &ProxyRequest) -> Vec<IpAddr> {
+        let mut ips = vec![addr];
+        if !self.proxy.trust_headers {
+            return ips;
+        }
+        let headers = req.headers();
+        let proxy_ips = headers::get_forward_ip(headers, &self.proxy.trusted_headers);
+        if !proxy_ips.is_empty() {
+            ips.insert(0, proxy_ips[0]);
+            ips.extend(proxy_ips.into_iter().skip(1));
+        }
+        ips
+    }
+
+    /// Check global whitelist/blacklist
+    #[inline]
+    fn check_global(&self, ip: &IpAddr) -> Option<Ruling> {
+        if self.firewall.whitelist.contains(ip) {
+            return Some(Ruling::allow(ip.clone(), "whitelist"));
+        }
+        if self.firewall.blacklist.contains(ip) {
+            return Some(Ruling::block(ip.clone(), "blacklist", 403));
         }
         if self
             .database
-            .whitelist_contains(&ip)
+            .whitelist_contains(ip)
             .expect("db whitelist access failed")
         {
-            return None;
+            return Some(Ruling::allow(ip.clone(), "allowed"));
         }
         if self
             .database
-            .blacklist_contains(&ip)
+            .blacklist_contains(ip)
             .expect("db blacklist access failed")
         {
-            return Some(ip);
+            return Some(Ruling::block(ip.clone(), "blocked", 403));
         }
         None
     }
-    pub fn is_blocked(&self, mut addr: IpAddr, req: &ProxyRequest) -> Determination {
+
+    pub fn is_blocked(&mut self, addr: IpAddr, req: &ProxyRequest) -> Ruling {
         // determine global ip allow/deny
-        let mut ips = vec![addr];
-        let mut blocked = self.global_is_blocked(addr);
-        if self.proxy.trust_headers {
-            let headers = req.headers();
-            let proxy_ips = headers::get_forward_ip(headers, &self.proxy.trusted_headers);
-            if !proxy_ips.is_empty() {
-                addr = proxy_ips[0];
-                if blocked.is_none() {
-                    blocked = proxy_ips
-                        .clone()
-                        .into_iter()
-                        .find(|ip| self.global_is_blocked(*ip).is_some());
-                }
-                ips.insert(0, addr);
-                ips.extend(proxy_ips.into_iter().skip(1));
-            }
+        let ips = self.get_ips(addr, req);
+        let addr = ips[0];
+        if let Some(ruling) = ips.iter().find_map(|ip| self.check_global(ip)) {
+            return ruling;
         }
-        log::trace!("global ip block? {blocked:?}");
         // determine if path is blocked
-        if blocked.is_none() {
-            let path = req.uri().path();
-            for control in self.controls.iter() {
-                if !control.matches_path(path) {
-                    log::trace!("evaluating control {control:?} (path: {path})");
-                    continue;
-                }
-                if control.match_allow(&addr) {
-                    log::trace!("{addr} allowed for {control:?} (path: {path})");
-                    continue;
-                }
-                if let Some(ip) = control.match_deny_any(&ips) {
+        let path = req.uri().path();
+        log::trace!("evaluating {:?} controls", self.controls.len());
+        for (rule_num, control) in self.controls.iter().enumerate() {
+            if !control.matches_path(path) {
+                log::trace!("evaluating control {control:?} (path: {path})");
+                continue;
+            }
+            if control.match_skip(&addr) {
+                log::trace!("{addr} allowed for {control:?} (path: {path})");
+                continue;
+            }
+            let Some(ip) = control.match_deny_any(&ips) else {
+                log::trace!("{addr} skipped rate-limit {control:?} (path: {path})");
+                continue;
+            };
+            match control.action {
+                Action::Block => {
                     log::debug!("{ip} blocked due to {control:?} (path: {path})");
-                    blocked = Some(ip);
-                    break;
+                    let reason = format!("rule_{rule_num}");
+                    return Ruling::block(ip, &reason, 403);
+                }
+                Action::Ratelimit { .. } => {
+                    log::trace!("{ip} being checked for ratelimit");
+                    if self.ratelimit.should_block(rule_num, &ip) {
+                        log::debug!("{ip} rate limited due to {control:?} (path: {path})");
+                        return Ruling::block(ip, "ratelimit", 429);
+                    }
                 }
             }
         }
-        match blocked {
-            Some(addr) => (true, addr),
-            None => (false, addr),
-        }
+        Ruling::allow(addr, "all_passed")
     }
 }
