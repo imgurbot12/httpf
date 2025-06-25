@@ -5,7 +5,7 @@ use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use cookie::Cookie;
-use http::header::COOKIE;
+use http::header::{CONTENT_TYPE, COOKIE};
 use hyper::Response;
 use rand::{distr::Alphanumeric, Rng};
 
@@ -127,6 +127,7 @@ impl BotFilter {
             .to_string();
         Response::builder()
             .status(403)
+            .header(CONTENT_TYPE, "text/html")
             .body(full(content))
             .expect("failed to construct challenge response")
     }
