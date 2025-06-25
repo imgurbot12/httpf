@@ -18,6 +18,7 @@ pub struct Config {
     pub controls: Vec<ControlConfig>,
 }
 
+/// Proxy TLS Configuration Settings
 #[derive(Debug, Clone, Deserialize)]
 pub struct TlsConfig {
     pub cert: PathBuf,
@@ -54,11 +55,42 @@ pub struct FirewallConfig {
     pub database: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct Duration(pub std::time::Duration);
+
+impl FromStr for Duration {
+    type Err = humantime::DurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let duration = humantime::parse_duration(s)?;
+        Ok(Self(duration))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ChallengeConfig {
+    pub cookie: String,
+    pub timeout: Duration,
+    pub threshold: usize,
+}
+
+impl Default for ChallengeConfig {
+    fn default() -> Self {
+        Self {
+            cookie: "HTTPF-Challenge".to_owned(),
+            timeout: Duration(std::time::Duration::from_secs(60)),
+            threshold: 20,
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
     #[default]
     Block,
+    Challenge(ChallengeConfig),
     Ratelimit {
         limit: usize,
         #[serde(default)]
@@ -84,17 +116,23 @@ impl ControlConfig {
         self.path.0.is_match(path)
     }
     #[inline]
-    pub fn match_skip(&self, ip: &IpAddr) -> bool {
-        self.skip.iter().find(|rule| rule.contains(ip)).is_some()
+    pub fn match_skip(&self, ip: &IpAddr, path: &str) -> bool {
+        self.skip
+            .iter()
+            .find(|rule| rule.contains(ip, path))
+            .is_some()
     }
     #[inline]
-    pub fn match_deny(&self, ip: &IpAddr) -> bool {
-        self.matches.iter().find(|rule| rule.contains(ip)).is_some()
+    pub fn match_deny(&self, ip: &IpAddr, path: &str) -> bool {
+        self.matches
+            .iter()
+            .find(|rule| rule.contains(ip, path))
+            .is_some()
     }
     #[inline]
-    pub fn match_deny_any(&self, ips: &Vec<IpAddr>) -> Option<IpAddr> {
+    pub fn match_deny_any(&self, ips: &Vec<IpAddr>, path: &str) -> Option<IpAddr> {
         ips.iter()
-            .find(|ip| self.match_deny(ip))
+            .find(|ip| self.match_deny(ip, path))
             .map(|ip| ip.clone())
     }
 }
@@ -127,14 +165,16 @@ impl FromStr for PathMatch {
 #[derive(Debug)]
 pub enum ControlMatch {
     All,
+    Path(PathMatch),
     IPNet(ipnet::IpNet),
     IpAddr(IpAddr),
 }
 
 impl ControlMatch {
-    pub fn contains(&self, ip: &IpAddr) -> bool {
+    pub fn contains(&self, ip: &IpAddr, path: &str) -> bool {
         match self {
             Self::All => true,
+            Self::Path(rule) => rule.0.is_match(path),
             Self::IpAddr(rip) => ip == rip,
             Self::IPNet(net) => net.contains(ip),
         }
@@ -156,6 +196,9 @@ impl FromStr for ControlMatch {
         if let Ok(ip) = s.parse() {
             return Ok(Self::IpAddr(ip));
         }
+        if let Ok(path) = PathMatch::from_str(s) {
+            return Ok(Self::Path(path));
+        }
         Err(format!("invalid control rule: {s:?}"))
     }
 }
@@ -174,5 +217,6 @@ macro_rules! de_fromstr {
     };
 }
 
+de_fromstr!(Duration);
 de_fromstr!(PathMatch);
 de_fromstr!(ControlMatch);

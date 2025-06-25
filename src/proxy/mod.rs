@@ -32,7 +32,7 @@ use tls::{setup_tls, UniversalTcpStream};
 use tokiort::TokioIo;
 
 pub type ProxyRequest = Request<Incoming>;
-type ProxyResponse = Response<BoxBody<Bytes, hyper::Error>>;
+pub type ProxyResponse = Response<BoxBody<Bytes, hyper::Error>>;
 type ProxyResult = Result<ProxyResponse, anyhow::Error>;
 type ProxyClient = Client<HttpsConnector<HttpConnector<GaiResolver>>, Incoming>;
 
@@ -138,6 +138,10 @@ impl ReverseProxy {
                             );
                             proxy(config, client, req).await
                         }
+                        Ruling::Challenge { ip, res } => {
+                            log::info!("[CHALLENGE] {ip} (from: {src}) {method} {uri}");
+                            Ok(res)
+                        }
                         Ruling::Deny { ip, reason, code } => {
                             log::warn!(
                                 "[REJECT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
@@ -165,7 +169,7 @@ impl ReverseProxy {
 }
 
 #[inline]
-fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+pub fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed()

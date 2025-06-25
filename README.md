@@ -49,6 +49,13 @@ controls:
     action:
       type: 'block'
 
+  # javascript challenge to filter bots
+  - path: '/'
+    skip:  ['/robots.txt', '/api/']
+    match: ['all']
+    action:
+      type: 'challenge'
+
   # nginx style matchers for denying/allowing access per ip
   # https://www.digitalocean.com/community/tutorials/nginx-location-directive
   - path: '= /limit'

@@ -6,14 +6,14 @@ use std::time::Instant;
 
 const DEFAULT_IP: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
-struct Limiter {
+pub struct Limiter {
     limit: usize,
     count: usize,
     expires: Instant,
 }
 
 impl Limiter {
-    fn new(limit: usize) -> Self {
+    pub fn new(limit: usize) -> Self {
         Self {
             limit,
             count: 0,
@@ -21,7 +21,7 @@ impl Limiter {
         }
     }
 
-    fn should_block(&mut self) -> bool {
+    pub fn should_block(&mut self) -> bool {
         if self.expires.elapsed().as_secs() >= 1 {
             self.expires = Instant::now();
             self.count = 0;

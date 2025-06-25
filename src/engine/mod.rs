@@ -2,8 +2,9 @@ use std::net::IpAddr;
 
 use crate::config::*;
 use crate::database::Database;
-use crate::proxy::ProxyRequest;
+use crate::proxy::{ProxyRequest, ProxyResponse};
 
+mod filters;
 mod headers;
 mod ratelimit;
 
@@ -12,6 +13,10 @@ pub enum Ruling {
     Allow {
         ip: IpAddr,
         reason: String,
+    },
+    Challenge {
+        ip: IpAddr,
+        res: ProxyResponse,
     },
     Deny {
         ip: IpAddr,
@@ -43,15 +48,21 @@ pub struct Engine {
     firewall: FirewallConfig,
     controls: Vec<ControlConfig>,
     database: Database,
+    filters: filters::FilterGroup,
     ratelimit: ratelimit::RateLimiterGroup,
 }
 
 impl Engine {
     pub fn new(config: Config, database: Database) -> Self {
+        let mut filters = filters::FilterGroup::default();
         let mut ratelimit = ratelimit::RateLimiterGroup::default();
         for (rule_num, control) in config.controls.iter().enumerate() {
-            if let Action::Ratelimit { limit, global } = control.action {
-                ratelimit.register(rule_num, limit, global);
+            match &control.action {
+                Action::Challenge(cfg) => filters.register(rule_num, &cfg),
+                Action::Ratelimit { limit, global } => {
+                    ratelimit.register(rule_num, *limit, *global)
+                }
+                _ => {}
             }
         }
         Self {
@@ -60,6 +71,7 @@ impl Engine {
             controls: config.controls,
             database,
             ratelimit,
+            filters,
         }
     }
 
@@ -120,12 +132,12 @@ impl Engine {
                 log::trace!("evaluating control {control:?} (path: {path})");
                 continue;
             }
-            if control.match_skip(&addr) {
+            if control.match_skip(&addr, path) {
                 log::trace!("{addr} allowed for {control:?} (path: {path})");
                 continue;
             }
-            let Some(ip) = control.match_deny_any(&ips) else {
-                log::trace!("{addr} skipped rate-limit {control:?} (path: {path})");
+            let Some(ip) = control.match_deny_any(&ips, path) else {
+                log::trace!("{addr} skipped {control:?} (path: {path})");
                 continue;
             };
             match control.action {
@@ -133,6 +145,13 @@ impl Engine {
                     log::debug!("{ip} blocked due to {control:?} (path: {path})");
                     let reason = format!("rule_{rule_num}");
                     return Ruling::block(ip, &reason, 403);
+                }
+                Action::Challenge { .. } => {
+                    log::trace!("{ip} being checked for challenge");
+                    if let Some(res) = self.filters.challenge(rule_num, &ip, req) {
+                        log::debug!("{ip} challenged due to {control:?} (path: {path})");
+                        return Ruling::Challenge { ip, res };
+                    }
                 }
                 Action::Ratelimit { .. } => {
                     log::trace!("{ip} being checked for ratelimit");
