@@ -22,7 +22,6 @@ hyper-util = { version = "0.1.14", features = ["client-legacy", "http1"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 jsfuck = "1.0.6"
 log = "0.4.27"
-minify-html-onepass = "0.16.4"
 pin-project-lite = "0.2.16"
 rand = "0.9.1"
 regex = "1.11.1"

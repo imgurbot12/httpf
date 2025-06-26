@@ -156,21 +156,9 @@ pub struct ChallengeGroup {
 impl ChallengeGroup {
     #[inline]
     pub fn register(&mut self, rule_num: usize, config: &ChallengeConfig) -> Result<()> {
-        let mut template = match config.template.as_ref().filter(|p| p.exists()) {
+        let template = match config.template.as_ref().filter(|p| p.exists()) {
             Some(path) => std::fs::read_to_string(path).context("failed to read template")?,
             None => HTML_TEMPLATE.to_owned(),
-        };
-        let template = match config.minify {
-            false => template,
-            true => {
-                let cfg = minify_html_onepass::Cfg {
-                    minify_js: false,
-                    minify_css: true,
-                };
-                minify_html_onepass::in_place_str(&mut template, &cfg)
-                    .context("failed to minify template")?
-                    .to_string()
-            }
         };
         self.filters.insert(
             rule_num,

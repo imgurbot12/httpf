@@ -67,11 +67,6 @@ impl FromStr for Duration {
     }
 }
 
-#[inline]
-fn _true() -> bool {
-    true
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct ChallengeConfig {
@@ -79,8 +74,6 @@ pub struct ChallengeConfig {
     pub timeout: Duration,
     pub threshold: usize,
     pub template: Option<PathBuf>,
-    #[serde(default = "_true")]
-    pub minify: bool,
 }
 
 impl Default for ChallengeConfig {
@@ -90,7 +83,6 @@ impl Default for ChallengeConfig {
             timeout: Duration(std::time::Duration::from_secs(60)),
             threshold: 20,
             template: None,
-            minify: true,
         }
     }
 }
