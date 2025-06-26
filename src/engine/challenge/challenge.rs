@@ -4,34 +4,34 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
+use anyhow::{Context, Result};
 use cookie::Cookie;
 use http::header::{CONTENT_TYPE, COOKIE};
 use hyper::Response;
-use rand::{distr::Alphanumeric, Rng};
+use rand::distr::Alphanumeric;
+use rand::Rng;
 
 use crate::config::ChallengeConfig;
 use crate::proxy::{full, ProxyResponse};
 use crate::{engine::ratelimit::Limiter, proxy::ProxyRequest};
 
-//TODO: new bot detection and challenge action
-//TODO: configuration for new action type
+const HTML_TEMPLATE: &'static str = include_str!("static/challenge.html");
+const SIMPLE_CHALLENGE: &'static str = include_str!("static/js/simple.js");
 
-const HTML_TEMPLATE: &'static str = include_str!("html/challenge.html");
-
-fn random_cookie() -> String {
+fn randstr(length: usize) -> String {
     rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(16)
+        .sample_iter(Alphanumeric)
+        .take(length)
         .map(char::from)
         .collect()
 }
 
-struct Context {
+struct ChallengeCtx {
     access: Instant,
     threshold: Limiter,
 }
 
-impl Context {
+impl ChallengeCtx {
     fn new(limit: usize) -> Self {
         let access = Instant::now();
         let threshold = Limiter::new(limit);
@@ -50,10 +50,11 @@ impl Context {
 }
 
 struct BotFilter {
+    template: String,
     cookie: String,
     timeout: Duration,
     threshold: usize,
-    contexts: HashMap<String, Context>,
+    contexts: HashMap<String, ChallengeCtx>,
     last_clean: Instant,
 }
 
@@ -109,19 +110,33 @@ impl BotFilter {
     }
 
     pub fn challenge(&mut self) -> ProxyResponse {
-        // generate tracking context
-        let cookie = random_cookie();
-        self.contexts
-            .insert(cookie.clone(), Context::new(self.threshold));
-        // construct body and response
-        let content = regex::Regex::new(r"\{\{(.*?)\}\}")
-            .expect("invalid regex template")
-            .replace_all(&HTML_TEMPLATE, |caps: &regex::Captures| {
-                let key = caps.get(1).unwrap().as_str().trim();
-                match key {
+        // compile javascript challenge
+        let rgx = regex::Regex::new(r"\{\{(.*?)\}\}").expect("invalid regex template");
+        let cookie = randstr(8);
+        let challenge = rgx
+            .replace_all(&SIMPLE_CHALLENGE, |c: &regex::Captures| {
+                match c.get(1).unwrap().as_str().trim() {
                     "cookie_name" => self.cookie.clone(),
-                    "cookie_value" => cookie.clone(),
-                    _ => panic!("invalid template key"),
+                    "cookie_value" => jsfuck::obfuscate(&cookie),
+                    key => {
+                        log::error!("invalid template key {key:?}");
+                        String::new()
+                    }
+                }
+            })
+            .to_string();
+        // generate tracking context
+        self.contexts
+            .insert(cookie, ChallengeCtx::new(self.threshold));
+        // construct body and response
+        let content = rgx
+            .replace_all(&self.template, |c: &regex::Captures| {
+                match c.get(1).unwrap().as_str().trim() {
+                    "challenge" => challenge.clone(),
+                    key => {
+                        log::error!("invalid template key {key:?}");
+                        String::new()
+                    }
                 }
             })
             .to_string();
@@ -134,13 +149,29 @@ impl BotFilter {
 }
 
 #[derive(Default)]
-pub struct FilterGroup {
+pub struct ChallengeGroup {
     filters: HashMap<usize, BotFilter>,
 }
 
-impl FilterGroup {
+impl ChallengeGroup {
     #[inline]
-    pub fn register(&mut self, rule_num: usize, config: &ChallengeConfig) {
+    pub fn register(&mut self, rule_num: usize, config: &ChallengeConfig) -> Result<()> {
+        let mut template = match config.template.as_ref().filter(|p| p.exists()) {
+            Some(path) => std::fs::read_to_string(path).context("failed to read template")?,
+            None => HTML_TEMPLATE.to_owned(),
+        };
+        let template = match config.minify {
+            false => template,
+            true => {
+                let cfg = minify_html_onepass::Cfg {
+                    minify_js: false,
+                    minify_css: true,
+                };
+                minify_html_onepass::in_place_str(&mut template, &cfg)
+                    .context("failed to minify template")?
+                    .to_string()
+            }
+        };
         self.filters.insert(
             rule_num,
             BotFilter {
@@ -149,8 +180,10 @@ impl FilterGroup {
                 threshold: config.threshold,
                 contexts: Default::default(),
                 last_clean: Instant::now(),
+                template,
             },
         );
+        Ok(())
     }
     #[inline]
     pub fn challenge(

@@ -46,16 +46,16 @@ pub struct ReverseProxy {
 }
 
 impl ReverseProxy {
-    pub fn new(config: Config, database: Database) -> Self {
+    pub fn new(config: Config, database: Database) -> Result<Self> {
         if config.resolve.is_empty() {
             panic!("resolution list must not be empty");
         }
-        Self {
+        Ok(Self {
             listen: config.listen.clone(),
             resolve: config.resolve.clone(),
             rotation: 0,
-            inner: Arc::new(Mutex::new(Engine::new(config, database))),
-        }
+            inner: Arc::new(Mutex::new(Engine::new(config, database)?)),
+        })
     }
 
     fn setup_tls(&self) -> Result<Option<TlsAcceptor>> {

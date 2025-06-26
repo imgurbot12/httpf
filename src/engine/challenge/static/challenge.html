@@ -61,9 +61,6 @@
       <h3>Please ensure javascript is enabled to access this website.</h3>
     </noscript>
 
-    <script>
-      document.cookie = "{{ cookie_name }}={{ cookie_value }}; Path=/;"
-      setTimeout(() => location.reload(), 1000);
-    </script>
+    <script> {{ challenge }} </script>
   </body>
 </html>

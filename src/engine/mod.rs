@@ -1,10 +1,12 @@
 use std::net::IpAddr;
 
+use anyhow::{Context, Result};
+
 use crate::config::*;
 use crate::database::Database;
 use crate::proxy::{ProxyRequest, ProxyResponse};
 
-mod filters;
+mod challenge;
 mod headers;
 mod ratelimit;
 
@@ -48,31 +50,33 @@ pub struct Engine {
     firewall: FirewallConfig,
     controls: Vec<ControlConfig>,
     database: Database,
-    filters: filters::FilterGroup,
+    challenges: challenge::ChallengeGroup,
     ratelimit: ratelimit::RateLimiterGroup,
 }
 
 impl Engine {
-    pub fn new(config: Config, database: Database) -> Self {
-        let mut filters = filters::FilterGroup::default();
+    pub fn new(config: Config, database: Database) -> Result<Self> {
+        let mut filters = challenge::ChallengeGroup::default();
         let mut ratelimit = ratelimit::RateLimiterGroup::default();
         for (rule_num, control) in config.controls.iter().enumerate() {
             match &control.action {
-                Action::Challenge(cfg) => filters.register(rule_num, &cfg),
+                Action::Challenge(cfg) => filters
+                    .register(rule_num, &cfg)
+                    .context("filter rule failed to register")?,
                 Action::Ratelimit { limit, global } => {
                     ratelimit.register(rule_num, *limit, *global)
                 }
                 _ => {}
             }
         }
-        Self {
+        Ok(Self {
             proxy: config.proxy,
             firewall: config.firewall,
             controls: config.controls,
             database,
             ratelimit,
-            filters,
-        }
+            challenges: filters,
+        })
     }
 
     /// Retrieve all IPs associated with request
@@ -148,7 +152,7 @@ impl Engine {
                 }
                 Action::Challenge { .. } => {
                     log::trace!("{ip} being checked for challenge");
-                    if let Some(res) = self.filters.challenge(rule_num, &ip, req) {
+                    if let Some(res) = self.challenges.challenge(rule_num, &ip, req) {
                         log::debug!("{ip} challenged due to {control:?} (path: {path})");
                         return Ruling::Challenge { ip, res };
                     }

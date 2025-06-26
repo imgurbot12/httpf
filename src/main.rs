@@ -34,7 +34,7 @@ async fn main() -> Result<ExitCode> {
     let command = cli.command.unwrap_or(Command::Run);
     let result = match command {
         Command::Run => {
-            let proxy = proxy::ReverseProxy::new(config, database);
+            let proxy = proxy::ReverseProxy::new(config, database)?;
             proxy.run().await?;
             true
         }
