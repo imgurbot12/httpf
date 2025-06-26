@@ -27,24 +27,26 @@ fn randstr(length: usize) -> String {
 }
 
 struct ChallengeCtx {
-    access: Instant,
+    last_access: Instant,
     threshold: Limiter,
 }
 
 impl ChallengeCtx {
     fn new(limit: usize) -> Self {
-        let access = Instant::now();
-        let threshold = Limiter::new(limit);
-        Self { access, threshold }
+        Self {
+            last_access: Instant::now(),
+            threshold: Limiter::new(limit),
+        }
     }
 
     #[inline]
     fn is_expired(&self, now: Instant, timeout: Duration) -> bool {
         let expired = now.checked_sub(timeout).expect("timeout too large");
-        expired >= self.access
+        expired >= self.last_access
     }
     #[inline]
     fn should_challenge(&mut self) -> bool {
+        self.last_access = Instant::now();
         self.threshold.should_block()
     }
 }
