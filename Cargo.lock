@@ -642,6 +642,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "futures",
+ "glob",
  "http",
  "http-body-util",
  "humantime",

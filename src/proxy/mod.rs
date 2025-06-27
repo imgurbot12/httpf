@@ -1,11 +1,13 @@
 //! Implementation Stolen and Customized from https://github.com/hyperium/hyper/blob/master/examples/http_proxy.rs
 //! LICENSE: https://github.com/hyperium/hyper/blob/master/LICENSE (MIT)
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
+use http::header::HOST;
 use http::HeaderValue;
 use http_body_util::Full;
 use http_body_util::{combinators::BoxBody, BodyExt};
@@ -36,25 +38,36 @@ pub type ProxyResponse = Response<BoxBody<Bytes, hyper::Error>>;
 type ProxyResult = Result<ProxyResponse, anyhow::Error>;
 type ProxyClient = Client<HttpsConnector<HttpConnector<GaiResolver>>, Incoming>;
 
-type Inner = Arc<Mutex<Engine>>;
+pub struct ProxyInner {
+    rotation: HashMap<String, usize>,
+    engine: Engine,
+}
 
 pub struct ReverseProxy {
     listen: ListenConfig,
-    resolve: Vec<url::Url>,
-    rotation: usize,
-    inner: Inner,
+    resolve: ResolveConfig,
+    inner: Arc<Mutex<ProxyInner>>,
 }
 
 impl ReverseProxy {
     pub fn new(config: Config, database: Database) -> Result<Self> {
-        if config.resolve.is_empty() {
-            panic!("resolution list must not be empty");
+        if config.resolve.default.is_empty() && config.resolve.domains.is_empty() {
+            return Err(anyhow!("no domain resolution present"));
         }
+        let mut rotation: HashMap<String, usize> = config
+            .resolve
+            .domains
+            .keys()
+            .map(|d| (d.pattern.clone(), 0))
+            .collect();
+        rotation.insert("default".to_owned(), 0);
         Ok(Self {
             listen: config.listen.clone(),
             resolve: config.resolve.clone(),
-            rotation: 0,
-            inner: Arc::new(Mutex::new(Engine::new(config, database)?)),
+            inner: Arc::new(Mutex::new(ProxyInner {
+                rotation,
+                engine: Engine::new(config, database)?,
+            })),
         })
     }
 
@@ -65,7 +78,7 @@ impl ReverseProxy {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         let server_tls = self.setup_tls()?;
         let addr = SocketAddr::from((self.listen.host, self.listen.port));
 
@@ -84,10 +97,9 @@ impl ReverseProxy {
             .await
             .context("failed to bind tcp listener")?;
 
-        let scheme = if server_tls.is_some() {
-            "https"
-        } else {
-            "http"
+        let scheme = match server_tls.is_some() {
+            true => "https",
+            false => "http",
         };
         log::info!("Listening on {scheme}://{addr}");
 
@@ -111,24 +123,47 @@ impl ReverseProxy {
             let io = TokioIo::new(stream);
             log::debug!("New Connection {addr:?}");
 
-            // round robin rotate urls
-            let base_url = self.resolve[self.rotation].clone();
-            self.rotation = (self.rotation + 1) % self.resolve.len();
-
             // build proxy handler function
             let inner = Arc::clone(&self.inner);
             let client = Arc::clone(&client);
-            let proxy_fn = service_fn(move |req| {
+            let resolve = self.resolve.clone();
+            let proxy_fn = service_fn(move |mut req| {
                 // check if native ip or forwarded ip should be accepted/rejected
                 let src = addr.ip();
-                let rule = {
+                let (base_url, rule) = {
+                    // rotate through available urls to load-balance
                     let mut inner = inner.lock().expect("failed mutex lock");
-                    inner.is_blocked(src.clone(), &req)
+                    let rule = inner.engine.is_blocked(src.clone(), &req);
+                    match rule {
+                        Ruling::Allow { .. } => {
+                            // find list of urls to resolve to associated with request
+                            let host = req.headers().get(HOST).and_then(|h| h.to_str().ok());
+                            let (domain, urls) = host
+                                .and_then(|host| {
+                                    resolve
+                                        .domains
+                                        .iter()
+                                        .find(|(matcher, _)| matcher.glob.matches(&host))
+                                        .map(|(matcher, urls)| (matcher.pattern.clone(), urls))
+                                })
+                                .unwrap_or(("default".to_owned(), &resolve.default));
+                            // rotate through available urls to load-balance
+                            let rotation =
+                                inner.rotation.remove(&domain).expect("missing rotation");
+                            let base_url = urls[rotation].clone();
+                            inner.rotation.insert(domain, (rotation + 1) % urls.len());
+                            (base_url, rule)
+                        }
+                        rule => (url::Url::parse("http://example.com").unwrap(), rule),
+                    }
                 };
                 // handle forwarding request
                 let config = base_url.clone();
                 let client = Arc::clone(&client);
                 async move {
+                    let result = request::combine_urls(&config, &req.uri())?;
+                    *req.uri_mut() = result.uri;
+
                     let uri = req.uri();
                     let method = req.method();
                     match rule {
@@ -136,7 +171,7 @@ impl ReverseProxy {
                             log::info!(
                                 "[ACCEPT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
                             );
-                            proxy(config, client, req).await
+                            proxy(result.host, result.authorization, client, req).await
                         }
                         Ruling::Challenge { ip, res } => {
                             log::info!("[CHALLENGE] {ip} (from: {src}) {method} {uri}");
@@ -188,16 +223,18 @@ fn blocked_response(code: u16) -> ProxyResponse {
         .expect("invalid block response")
 }
 
-async fn proxy(url: url::Url, client: Arc<ProxyClient>, mut req: ProxyRequest) -> ProxyResult {
-    let result = request::combine_urls(&url, &req.uri())?;
-    *req.uri_mut() = result.uri;
-
+async fn proxy(
+    host: String,
+    auth: Option<String>,
+    client: Arc<ProxyClient>,
+    mut req: ProxyRequest,
+) -> ProxyResult {
     let headers = req.headers_mut();
     headers.insert(
         http::header::HOST,
-        HeaderValue::from_str(&result.host).context("invalid host header")?,
+        HeaderValue::from_str(&host).context("invalid host header")?,
     );
-    if let Some(auth) = result.authorization {
+    if let Some(auth) = auth {
         headers.insert(
             http::header::AUTHORIZATION,
             HeaderValue::from_str(&auth).context("invalid auth header")?,

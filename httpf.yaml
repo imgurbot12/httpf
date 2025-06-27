@@ -5,7 +5,11 @@ listen:
 
 # protected resources that valid requests resolve to
 resolve:
-  - https://example.com
+  default:
+    - https://example.com
+  # write glob rules for host specific resolution
+  '*.example.com':
+    - https://www.example.com
 
 # useful if httpf is behind another proxy (only allow headers you trust)
 proxy:
@@ -16,7 +20,7 @@ proxy:
 firewall:
   database:  'httpf.db'
   blacklist: []
-  whitelist: ['127.0.0.1']
+  # whitelist: ['127.0.0.1']
 
 # block & ratelimit access rules
 controls:

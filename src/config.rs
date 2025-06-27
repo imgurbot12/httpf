@@ -1,6 +1,6 @@
 //! File Based Configuration for Proxy
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -11,7 +11,7 @@ use serde::{de::Error, Deserialize};
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub listen: ListenConfig,
-    pub resolve: Vec<url::Url>,
+    pub resolve: ResolveConfig,
     pub proxy: ProxyConfig,
     pub firewall: FirewallConfig,
     #[serde(default)]
@@ -39,6 +39,30 @@ pub struct ProxyConfig {
     pub trust_headers: bool,
     #[serde(default)]
     pub trusted_headers: TrustedHeaders,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResolveConfig {
+    pub default: Vec<url::Url>,
+    #[serde(flatten)]
+    pub domains: BTreeMap<DomainMatch, Vec<url::Url>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DomainMatch {
+    pub pattern: String,
+    pub glob: glob::Pattern,
+}
+
+impl FromStr for DomainMatch {
+    type Err = glob::PatternError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let glob = glob::Pattern::new(s)?;
+        Ok(Self {
+            pattern: s.to_owned(),
+            glob,
+        })
+    }
 }
 
 pub type IpList = HashSet<IpAddr>;
@@ -220,6 +244,7 @@ macro_rules! de_fromstr {
     };
 }
 
+de_fromstr!(DomainMatch);
 de_fromstr!(Duration);
 de_fromstr!(PathMatch);
 de_fromstr!(ControlMatch);
