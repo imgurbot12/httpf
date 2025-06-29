@@ -193,7 +193,7 @@ impl ReverseProxy {
                     .with_upgrades()
                     .await
                 {
-                    log::error!("Failed to serve connection: {:?}", err);
+                    log::error!("{addr:?} Failed to serve connection: {:?}", err);
                 }
             });
         }
