@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+use base64::prelude::*;
 
+#[derive(Debug)]
 pub struct UrlResult {
     pub uri: http::Uri,
     pub host: String,
@@ -46,8 +48,11 @@ pub fn combine_urls(base: &url::Url, resolv: &http::Uri) -> Result<UrlResult> {
         .context("failed to construct url")?;
 
     let authorization = match base.has_authority() {
-        true => Some(base.authority().to_string()),
         false => None,
+        true => match base.authority().split_once("@") {
+            Some((auth, _)) => Some(format!("Basic {}", BASE64_STANDARD.encode(auth))),
+            None => None,
+        },
     };
 
     Ok(UrlResult {

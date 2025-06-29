@@ -234,13 +234,14 @@ async fn proxy(
         http::header::HOST,
         HeaderValue::from_str(&host).context("invalid host header")?,
     );
-    if let Some(auth) = auth {
-        headers.insert(
-            http::header::AUTHORIZATION,
-            HeaderValue::from_str(&auth).context("invalid auth header")?,
-        );
+    if !headers.contains_key(http::header::AUTHORIZATION) {
+        if let Some(auth) = auth {
+            headers.insert(
+                http::header::AUTHORIZATION,
+                HeaderValue::from_str(&auth).context("invalid auth header")?,
+            );
+        }
     }
-
     let res = client
         .request(req)
         .await
