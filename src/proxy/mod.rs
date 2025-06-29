@@ -127,7 +127,7 @@ impl ReverseProxy {
             let inner = Arc::clone(&self.inner);
             let client = Arc::clone(&client);
             let resolve = self.resolve.clone();
-            let proxy_fn = service_fn(move |mut req| {
+            let proxy_fn = service_fn(move |req| {
                 // check if native ip or forwarded ip should be accepted/rejected
                 let src = addr.ip();
                 let (base_url, rule) = {
@@ -166,17 +166,17 @@ impl ReverseProxy {
                     match rule {
                         Ruling::Allow { ip, reason } => {
                             log::info!(
-                                "[ACCEPT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
+                                "ACCEPT {ip} (from: {src}, reason: {reason}) {method} {uri}"
                             );
                             proxy(config, client, req).await
                         }
                         Ruling::Challenge { ip, res } => {
-                            log::info!("[CHALLENGE] {ip} (from: {src}) {method} {uri}");
+                            log::info!("CHALLENGE {ip} (from: {src}) {method} {uri}");
                             Ok(res)
                         }
                         Ruling::Deny { ip, reason, code } => {
                             log::warn!(
-                                "[REJECT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
+                                "REJECT {ip} (from: {src}, reason: {reason}) {method} {uri}"
                             );
                             Ok(blocked_response(code))
                         }
