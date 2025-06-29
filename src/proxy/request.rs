@@ -4,7 +4,6 @@ use base64::prelude::*;
 #[derive(Debug)]
 pub struct UrlResult {
     pub uri: http::Uri,
-    pub host: String,
     pub authorization: Option<String>,
 }
 
@@ -55,9 +54,5 @@ pub fn combine_urls(base: &url::Url, resolv: &http::Uri) -> Result<UrlResult> {
         },
     };
 
-    Ok(UrlResult {
-        uri,
-        host,
-        authorization,
-    })
+    Ok(UrlResult { uri, authorization })
 }

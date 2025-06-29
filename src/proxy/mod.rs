@@ -161,9 +161,6 @@ impl ReverseProxy {
                 let config = base_url.clone();
                 let client = Arc::clone(&client);
                 async move {
-                    let result = request::combine_urls(&config, &req.uri())?;
-                    *req.uri_mut() = result.uri;
-
                     let uri = req.uri();
                     let method = req.method();
                     match rule {
@@ -171,7 +168,7 @@ impl ReverseProxy {
                             log::info!(
                                 "[ACCEPT] {ip} (from: {src}, reason: {reason}) {method} {uri}"
                             );
-                            proxy(result.host, result.authorization, client, req).await
+                            proxy(config, client, req).await
                         }
                         Ruling::Challenge { ip, res } => {
                             log::info!("[CHALLENGE] {ip} (from: {src}) {method} {uri}");
@@ -223,19 +220,13 @@ fn blocked_response(code: u16) -> ProxyResponse {
         .expect("invalid block response")
 }
 
-async fn proxy(
-    host: String,
-    auth: Option<String>,
-    client: Arc<ProxyClient>,
-    mut req: ProxyRequest,
-) -> ProxyResult {
+async fn proxy(config: url::Url, client: Arc<ProxyClient>, mut req: ProxyRequest) -> ProxyResult {
+    let result = request::combine_urls(&config, &req.uri())?;
+    *req.uri_mut() = result.uri;
+
     let headers = req.headers_mut();
-    headers.insert(
-        http::header::HOST,
-        HeaderValue::from_str(&host).context("invalid host header")?,
-    );
     if !headers.contains_key(http::header::AUTHORIZATION) {
-        if let Some(auth) = auth {
+        if let Some(auth) = result.authorization {
             headers.insert(
                 http::header::AUTHORIZATION,
                 HeaderValue::from_str(&auth).context("invalid auth header")?,
